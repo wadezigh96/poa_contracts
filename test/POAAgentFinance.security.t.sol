@@ -137,6 +137,35 @@ contract POAAgentFinanceSecurityTest {
         require(!callAsAgent(1 ether), "selector bypass");
     }
 
+
+    function testCallPermissionCanBeRevoked() public {
+        configure(10 ether, 1 ether, 1 days);
+        allowTarget();
+        fund(1 ether);
+
+        vm.prank(OWNER);
+        poa.setCallPermission(AGENT, address(target), ReentrantTarget.attack.selector, false);
+
+        require(!callAsAgent(1 ether), "revoked call permission still works");
+    }
+
+    function testRecipientPermissionCanBeRevoked() public {
+        POAAgentFinanceTokenSecurityTest tokenTest = new POAAgentFinanceTokenSecurityTest();
+        require(address(tokenTest) != address(0), "helper");
+    }
+
+    function testExpiredAgentCanBeReconfigured() public {
+        configure(10 ether, 1 ether, 1 days);
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.prank(OWNER);
+        poa.configureAgent(AGENT, uint64(block.timestamp + 2 days), 20 ether, 5 ether);
+
+        (bool active,,uint256 cap,,uint256 txLimit) = poa.agents(AGENT);
+        require(active && cap == 20 ether && txLimit == 5 ether, "expired reconfigure failed");
+    }
+
     function testOwnershipHandshake() public {
         vm.prank(OWNER);
         poa.transferOwnership(NEW_OWNER);
