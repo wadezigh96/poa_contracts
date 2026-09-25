@@ -6,3 +6,8 @@ test = "test"
 script = "script"
 optimizer = true
 optimizer_runs = 200
+
+[invariant]
+runs = 256
+depth = 32
+fail_on_revert = false
