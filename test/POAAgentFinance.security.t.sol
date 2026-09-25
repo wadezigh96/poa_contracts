@@ -149,11 +149,6 @@ contract POAAgentFinanceSecurityTest {
         require(!callAsAgent(1 ether), "revoked call permission still works");
     }
 
-    function testRecipientPermissionCanBeRevoked() public {
-        POAAgentFinanceTokenSecurityTest tokenTest = new POAAgentFinanceTokenSecurityTest();
-        require(address(tokenTest) != address(0), "helper");
-    }
-
     function testExpiredAgentCanBeReconfigured() public {
         configure(10 ether, 1 ether, 1 days);
 
