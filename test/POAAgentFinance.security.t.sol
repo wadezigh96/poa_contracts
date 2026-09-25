@@ -8,6 +8,20 @@ interface Vm {
     function warp(uint256) external;
 }
 
+contract MockToken {
+    mapping(address => uint256) public balanceOf;
+    bool public returnFalse;
+
+    function mint(address to, uint256 amount) external { balanceOf[to] += amount; }
+    function setReturnFalse(bool value) external { returnFalse = value; }
+    function transfer(address to, uint256 amount) external returns (bool) {
+        if (returnFalse || balanceOf[msg.sender] < amount) return false;
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
+
 contract ReentrantTarget {
     POAAgentFinance internal immutable poa;
     bool public attempted;
@@ -38,10 +52,12 @@ contract POAAgentFinanceSecurityTest {
     address internal constant RECIPIENT = address(0x1003);
     address internal constant NEW_OWNER = address(0x2001);
     address internal constant TOKEN = address(0x3001);
+    MockToken internal token;
 
     function setUp() public {
         poa = new POAAgentFinance(OWNER);
         target = new ReentrantTarget(payable(address(poa)));
+        token = new MockToken();
     }
 
     function configure(uint256 cap, uint256 txLimit, uint256 duration) internal {
@@ -228,4 +244,141 @@ contract POAAgentFinanceSecurityTest {
     }
 
     receive() external payable {}
+}
+
+
+contract POAAgentFinanceTokenSecurityTest {
+    Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+    POAAgentFinance internal poa;
+    MockToken internal token;
+
+    address internal constant OWNER = address(0x5001);
+    address internal constant AGENT = address(0x5002);
+    address internal constant RECIPIENT = address(0x5003);
+
+    function setUp() public {
+        poa = new POAAgentFinance(OWNER);
+        token = new MockToken();
+    }
+
+    function configureToken(uint256 cap, uint256 txLimit) internal {
+        vm.prank(OWNER);
+        poa.setTokenPolicy(AGENT, address(token), cap, txLimit);
+        vm.prank(OWNER);
+        poa.setRecipientPermission(AGENT, RECIPIENT, true);
+    }
+
+    function activateAgent() internal {
+        vm.prank(OWNER);
+        poa.configureAgent(AGENT, uint64(block.timestamp + 1 days), 10 ether, 10 ether);
+    }
+
+    function testTokenTransferWithinLimit() public {
+        configureToken(100, 40);
+        activateAgent();
+        token.mint(address(poa), 100);
+
+        vm.prank(AGENT);
+        poa.transferToken(address(token), RECIPIENT, 40);
+
+        require(token.balanceOf(RECIPIENT) == 40, "token not transferred");
+        require(poa.tokenRemaining(AGENT, address(token)) == 60, "remaining token cap wrong");
+    }
+
+    function testTokenTxLimitEnforced() public {
+        configureToken(100, 40);
+        activateAgent();
+        token.mint(address(poa), 100);
+
+        vm.prank(AGENT);
+        (bool ok,) = address(poa).call(abi.encodeWithSelector(
+            poa.transferToken.selector, address(token), RECIPIENT, 41
+        ));
+        require(!ok, "token tx limit bypass");
+    }
+
+    function testTokenCumulativeCapEnforced() public {
+        configureToken(50, 50);
+        activateAgent();
+        token.mint(address(poa), 100);
+
+        vm.prank(AGENT);
+        poa.transferToken(address(token), RECIPIENT, 30);
+
+        vm.prank(AGENT);
+        (bool ok,) = address(poa).call(abi.encodeWithSelector(
+            poa.transferToken.selector, address(token), RECIPIENT, 21
+        ));
+        require(!ok, "token cumulative cap bypass");
+        require(poa.tokenRemaining(AGENT, address(token)) == 20, "token accounting changed");
+    }
+
+    function testRecipientAllowlistEnforced() public {
+        configureToken(100, 100);
+        activateAgent();
+        token.mint(address(poa), 100);
+
+        vm.prank(AGENT);
+        (bool ok,) = address(poa).call(abi.encodeWithSelector(
+            poa.transferToken.selector, address(token), address(0x9999), 1
+        ));
+        require(!ok, "recipient allowlist bypass");
+    }
+
+    function testFailedTokenTransferDoesNotConsumeCap() public {
+        configureToken(100, 100);
+        activateAgent();
+        token.mint(address(poa), 100);
+        token.setReturnFalse(true);
+
+        vm.prank(AGENT);
+        (bool ok,) = address(poa).call(abi.encodeWithSelector(
+            poa.transferToken.selector, address(token), RECIPIENT, 25
+        ));
+        require(!ok, "failed transfer accepted");
+        require(poa.tokenRemaining(AGENT, address(token)) == 100, "failed transfer consumed cap");
+    }
+
+    function testActiveAgentCannotResetNativeSpent() public {
+        activateAgent();
+
+        vm.prank(OWNER);
+        (bool ok,) = address(poa).call(abi.encodeWithSelector(
+            poa.configureAgent.selector,
+            AGENT,
+            uint64(block.timestamp + 2 days),
+            100 ether,
+            100 ether
+        ));
+        require(!ok, "active policy reset allowed");
+    }
+
+    function testActiveAgentCannotResetTokenSpent() public {
+        configureToken(100, 100);
+        activateAgent();
+        token.mint(address(poa), 100);
+
+        vm.prank(AGENT);
+        poa.transferToken(address(token), RECIPIENT, 25);
+
+        vm.prank(OWNER);
+        (bool ok,) = address(poa).call(abi.encodeWithSelector(
+            poa.setTokenPolicy.selector, AGENT, address(token), 1000, 1000
+        ));
+        require(!ok, "active token policy reset allowed");
+        require(poa.tokenRemaining(AGENT, address(token)) == 75, "token spent reset");
+    }
+
+    function testRevokeThenReconfigureIsAllowed() public {
+        activateAgent();
+
+        vm.prank(OWNER);
+        poa.revokeAgent(AGENT);
+
+        vm.prank(OWNER);
+        poa.configureAgent(AGENT, uint64(block.timestamp + 2 days), 20 ether, 5 ether);
+
+        (bool active,,uint256 cap,,uint256 txLimit) = poa.agents(AGENT);
+        require(active && cap == 20 ether && txLimit == 5 ether, "reconfigure failed");
+    }
 }
