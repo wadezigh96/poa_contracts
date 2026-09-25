@@ -42,7 +42,7 @@ contract POAAgentFinance {
     uint256 private _lock = 1;
     modifier onlyOwner(){if(msg.sender!=owner)revert NotOwner();_;} 
     modifier whenNotPaused(){if(paused)revert Paused();_;} 
-    modifier onlyActiveAgent(){AgentPolicy memory p=agents[msg.sender];if(!p.active)revert NotAgent();if(p.expiresAt==0||block.timestamp>=p.expiresAt)revert Expired();if(paused)revert Paused();_;_;} 
+    modifier onlyActiveAgent(){AgentPolicy memory p=agents[msg.sender];if(!p.active)revert NotAgent();if(p.expiresAt==0||block.timestamp>=p.expiresAt)revert Expired();if(paused)revert Paused();_;} 
     modifier nonReentrant(){if(_lock!=1)revert Reentrancy();_lock=2;_;_lock=1;}
 
     constructor(address initialOwner){if(initialOwner==address(0))revert InvalidOwner();owner=initialOwner;emit OwnershipTransferred(address(0),initialOwner);}
