@@ -24,7 +24,7 @@ contract POAAgentFinance {
     error NotOwner(); error NotPendingOwner(); error NotAgent(); error Paused(); error InvalidAgent(); error Expired();
     error InvalidExpiry(); error CapExceeded(); error TxLimitExceeded(); error TargetNotAllowed(); error RecipientNotAllowed();
     error InvalidCallData(); error CallFailed(bytes reason); error TransferFailed(); error InvalidOwner(); error Reentrancy();
-    error InvalidPolicy(); error InvalidTarget(); error InvalidRecipient();
+    error InvalidPolicy(); error InvalidTarget(); error InvalidRecipient(); error AgentMustBeInactive();
 
     event OwnershipTransferStarted(address indexed previousOwner, address indexed pendingOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -42,7 +42,7 @@ contract POAAgentFinance {
     uint256 private _lock = 1;
     modifier onlyOwner(){if(msg.sender!=owner)revert NotOwner();_;} 
     modifier whenNotPaused(){if(paused)revert Paused();_;} 
-    modifier onlyActiveAgent(){AgentPolicy memory p=agents[msg.sender];if(!p.active)revert NotAgent();if(p.expiresAt==0||block.timestamp>=p.expiresAt)revert Expired();if(paused)revert Paused();_;} 
+    modifier onlyActiveAgent(){AgentPolicy memory p=agents[msg.sender];if(!p.active)revert NotAgent();if(p.expiresAt==0||block.timestamp>=p.expiresAt)revert Expired();if(paused)revert Paused();_;_;} 
     modifier nonReentrant(){if(_lock!=1)revert Reentrancy();_lock=2;_;_lock=1;}
 
     constructor(address initialOwner){if(initialOwner==address(0))revert InvalidOwner();owner=initialOwner;emit OwnershipTransferred(address(0),initialOwner);}
@@ -54,6 +54,7 @@ contract POAAgentFinance {
 
     function configureAgent(address agent,uint64 expiresAt,uint256 nativeCap,uint256 nativeTxLimit)external onlyOwner{
         if(agent==address(0)||agent==owner)revert InvalidAgent();
+        if(agents[agent].active)revert AgentMustBeInactive();
         if(expiresAt==0||expiresAt<=block.timestamp||expiresAt>block.timestamp+MAX_POLICY_DURATION)revert InvalidExpiry();
         if(nativeCap==0||nativeTxLimit==0||nativeTxLimit>nativeCap)revert InvalidPolicy();
         agents[agent]=AgentPolicy(true,expiresAt,nativeCap,0,nativeTxLimit);
@@ -70,6 +71,7 @@ contract POAAgentFinance {
     }
     function setTokenPolicy(address agent,address token,uint256 cap,uint256 txLimit)external onlyOwner{
         if(agent==address(0)||agent==owner)revert InvalidAgent();if(token==address(0))revert InvalidTarget();
+        if(agents[agent].active)revert AgentMustBeInactive();
         if(cap==0||txLimit==0||txLimit>cap)revert InvalidPolicy();tokenPolicies[agent][token]=TokenPolicy(cap,0,txLimit);emit TokenPolicySet(agent,token,cap,txLimit);
     }
     function deposit()external payable whenNotPaused{emit NativeDeposited(msg.sender,msg.value);}
