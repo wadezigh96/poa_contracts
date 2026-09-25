@@ -12,14 +12,17 @@ contract ReentrantTarget {
     POAAgentFinance internal immutable poa;
     bool public attempted;
 
-    constructor(address payable _poa) {
-        poa = POAAgentFinance(_poa);
-    }
+    constructor(address payable _poa) { poa = POAAgentFinance(_poa); }
 
     function attack() external payable {
         attempted = true;
         (bool ok,) = address(poa).call(
-            abi.encodeWithSelector(poa.execute.selector, address(this), 0, abi.encodeWithSelector(this.attack.selector))
+            abi.encodeWithSelector(
+                poa.execute.selector,
+                address(this),
+                0,
+                abi.encodeWithSelector(this.attack.selector)
+            )
         );
         require(!ok, "reentrancy succeeded");
     }
@@ -34,6 +37,7 @@ contract POAAgentFinanceSecurityTest {
     address internal constant AGENT = address(0x1002);
     address internal constant RECIPIENT = address(0x1003);
     address internal constant NEW_OWNER = address(0x2001);
+    address internal constant TOKEN = address(0x3001);
 
     function setUp() public {
         poa = new POAAgentFinance(OWNER);
@@ -58,13 +62,16 @@ contract POAAgentFinanceSecurityTest {
     function callAsAgent(uint256 value) internal returns (bool ok) {
         vm.prank(AGENT);
         (ok,) = address(poa).call(
-            abi.encodeWithSelector(poa.execute.selector, address(target), value, abi.encodeWithSelector(target.attack.selector))
+            abi.encodeWithSelector(
+                poa.execute.selector,
+                address(target),
+                value,
+                abi.encodeWithSelector(target.attack.selector)
+            )
         );
     }
 
-    function testOwner() public view {
-        require(poa.owner() == OWNER, "owner");
-    }
+    function testOwner() public view { require(poa.owner() == OWNER, "owner"); }
 
     function testTxLimit() public {
         configure(10 ether, 1 ether, 1 days);
@@ -129,6 +136,95 @@ contract POAAgentFinanceSecurityTest {
         fund(1 ether);
         require(callAsAgent(1 ether), "outer call failed");
         require(target.attempted(), "attack target not reached");
+    }
+
+    function testRejectZeroNativePolicy() public {
+        vm.prank(OWNER);
+        (bool ok,) = address(poa).call(
+            abi.encodeWithSelector(
+                poa.configureAgent.selector,
+                AGENT,
+                uint64(block.timestamp + 1 days),
+                0,
+                0
+            )
+        );
+        require(!ok, "zero native policy accepted");
+    }
+
+    function testRejectTxLimitAboveNativeCap() public {
+        vm.prank(OWNER);
+        (bool ok,) = address(poa).call(
+            abi.encodeWithSelector(
+                poa.configureAgent.selector,
+                AGENT,
+                uint64(block.timestamp + 1 days),
+                1 ether,
+                2 ether
+            )
+        );
+        require(!ok, "tx limit above cap accepted");
+    }
+
+    function testRejectZeroSelector() public {
+        vm.prank(OWNER);
+        (bool ok,) = address(poa).call(
+            abi.encodeWithSelector(
+                poa.setCallPermission.selector,
+                AGENT,
+                address(target),
+                bytes4(0),
+                true
+            )
+        );
+        require(!ok, "zero selector accepted");
+    }
+
+    function testRejectOwnerAsTarget() public {
+        vm.prank(OWNER);
+        (bool ok,) = address(poa).call(
+            abi.encodeWithSelector(
+                poa.setCallPermission.selector,
+                AGENT,
+                OWNER,
+                ReentrantTarget.attack.selector,
+                true
+            )
+        );
+        require(!ok, "owner target accepted");
+    }
+
+    function testRejectZeroTokenPolicy() public {
+        vm.prank(OWNER);
+        (bool ok,) = address(poa).call(
+            abi.encodeWithSelector(
+                poa.setTokenPolicy.selector,
+                AGENT,
+                TOKEN,
+                0,
+                0
+            )
+        );
+        require(!ok, "zero token policy accepted");
+    }
+
+    function testRejectZeroTokenTransfer() public {
+        configure(10 ether, 1 ether, 1 days);
+        vm.prank(OWNER);
+        poa.setTokenPolicy(AGENT, TOKEN, 100, 100);
+        vm.prank(OWNER);
+        poa.setRecipientPermission(AGENT, RECIPIENT, true);
+
+        vm.prank(AGENT);
+        (bool ok,) = address(poa).call(
+            abi.encodeWithSelector(
+                poa.transferToken.selector,
+                TOKEN,
+                RECIPIENT,
+                0
+            )
+        );
+        require(!ok, "zero token transfer accepted");
     }
 
     receive() external payable {}
