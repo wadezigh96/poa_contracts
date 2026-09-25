@@ -80,7 +80,7 @@ contract POAAgentFinance {
     modifier onlyActiveAgent() {
         AgentPolicy memory p = agents[msg.sender];
         if (!p.active) revert NotAgent();
-        if (p.expiresAt != 0 && block.timestamp > p.expiresAt) revert Expired();
+        if (p.expiresAt == 0 || block.timestamp >= p.expiresAt) revert Expired();
         if (paused) revert Paused();
         _;
     }
@@ -170,7 +170,6 @@ contract POAAgentFinance {
         emit NativeWithdrawn(to, amount);
     }
 
-    /// @notice Agent-controlled native execution through an owner-approved target/selector.
     function execute(address target, uint256 value, bytes calldata data)
         external
         onlyActiveAgent
@@ -198,7 +197,6 @@ contract POAAgentFinance {
         return ret;
     }
 
-    /// @notice Agent-controlled ERC20 transfer with explicit token, recipient and per-tx policy.
     function transferToken(address token, address recipient, uint256 amount)
         external
         onlyActiveAgent
@@ -220,7 +218,7 @@ contract POAAgentFinance {
 
     function agentRemainingNative(address agent) external view returns (uint256) {
         AgentPolicy memory p = agents[agent];
-        if (!p.active || p.expiresAt == 0 || block.timestamp > p.expiresAt || p.nativeSpent >= p.nativeCap) return 0;
+        if (!p.active || p.expiresAt == 0 || block.timestamp >= p.expiresAt || p.nativeSpent >= p.nativeCap) return 0;
         return p.nativeCap - p.nativeSpent;
     }
 
