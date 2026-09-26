@@ -20,9 +20,7 @@ The core principle is simple:
 
 The contract separates **human authority** from **agent execution authority**. Policies define what an agent can do, how much it can spend, where it can send funds, which contract functions it can call, and when its authority expires.
 
-This repository is intentionally **standalone**. It is not coupled to PRONOUS, Flitzr, Binance, Privy, or another application.
 
----
 
 ## Core workflow
 
